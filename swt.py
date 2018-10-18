@@ -3,6 +3,7 @@ from __future__ import division
 from collections import defaultdict
 import hashlib
 import math
+import matplotlib.pyplot as plt
 import os
 import time
 from urllib2 import urlopen
@@ -26,16 +27,17 @@ class SWTScrubber(object):
         :return: numpy array representing result of transform
         """
         canny, sobelx, sobely, theta = cls._create_derivative(filepath)
-        print "theta matrix:"
+        ''' print "theta matrix:"
         print theta[140:150,0:5]
+        '''
         #print canny[143,0]
-        gradiente=-1 #il gradiente deve essere uguale a 1 o a -1
+        gradiente=-1 #il gradiente deve essere uguale a 1 (trova lettere scure) o a -1
         swt = cls._swt(theta, canny, sobelx, sobely, gradiente)
 
 
-        shapes = cls._connect_components(swt)
+       # shapes = cls._connect_components(swt)
 
-        swts, heights, widths, topleft_pts, images = cls._find_letters(swt, shapes)
+        #swts, heights, widths, topleft_pts, images = cls._find_letters(swt, shapes)
         '''
         word_images = cls._find_words(swts, heights, widths, topleft_pts, images)
         '''
@@ -55,10 +57,17 @@ class SWTScrubber(object):
     @classmethod
     def _create_derivative(cls, filepath):
         img = cv2.imread(filepath,0)
+        '''tentativo di incorniciamento: FALLITO
+        img=funzioni.incornicia(img)
+        print img[len(img)-6:len(img),len(img[0])-10:len(img[0])]
+        '''
         edges = cv2.Canny(img, 175, 320, apertureSize=3, L2gradient = False)
+        #edges=cv2.imread("fusione_swt.jpg",0)
+
         # Create gradient map using Sobel
         sobelx64f = cv2.Sobel(img,cv2.CV_64F,1,0,ksize=-1)
         sobely64f = cv2.Sobel(img,cv2.CV_64F,0,1,ksize=-1)
+        print 'sobel finiti'
 
         theta = np.arctan2(sobely64f, sobelx64f)
         if diagnostics:
@@ -76,8 +85,10 @@ class SWTScrubber(object):
         swt = np.empty(theta.shape)
         swt[:] = np.Infinity
         rays = []
-        tolleranza=np.pi/6
-
+        rays2=[]
+        tolleranza=np.pi/2
+        diagonal=(int)(np.sqrt(len(theta)*len(theta) + len(theta[0])*len(theta[0])))
+        histRay=np.zeros((diagonal),dtype=np.uint8)
         inizio_swt= time.clock() - t0
 
         # now iterate over pixels in image, checking Canny to see if we're on an edge.
@@ -151,6 +162,7 @@ class SWTScrubber(object):
                                         for (rp_x, rp_y) in ray:
                                             swt[rp_y, rp_x] = min(thickness, swt[rp_y, rp_x])
                                         rays.append(ray)
+                                        rays2.append((ray,(int)(thickness)))
                                     break
                                 # this is positioned at end to ensure we don't add a point beyond image boundary
                                 ray.append((cur_x, cur_y))
@@ -161,17 +173,133 @@ class SWTScrubber(object):
                             prev_y = cur_y
 
         # Compute median SWT
-        for ray in rays:
-            median = np.median([swt[y, x] for (x, y) in ray])
+        '''for ray in rays:
+            median = np.median([swt[y, x] for (x, y) in ray)
             for (x, y) in ray:
                 swt[y, x] = min(median, swt[y, x])
         if diagnostics:
-            cv2.imwrite('swt.jpg', swt*5)
+            cv2.imwrite('swt.jpg', swt)
+            print "tempo totale swt in secondi:"
+            fine_swt = time.clock() - t0
+            print fine_swt-inizio_swt
+        '''
+        for i in range(0, len(rays2)):
+            histRay[rays2[i][1]] = histRay[rays2[i][1]] + 1
+        print histRay[20:30]
+
+
+        return swt
+
+    #swt sporca che trova quello che non è una lettera
+    @classmethod
+    def _swt2(self, theta, edges, sobelx64f, sobely64f, gradiente):
+        # create empty image, initialized to infinity
+        swt = np.empty(theta.shape)
+        swt[:] = np.Infinity
+        rays = []
+        tolleranza=np.pi/2
+
+        inizio_swt= time.clock() - t0
+
+        # now iterate over pixels in image, checking Canny to see if we're on an edge.
+        # if we are, follow a normal a ray to either the next edge or image border
+        # edgesSparse = scipy.sparse.coo_matrix(edges)
+        step_x_g = gradiente * sobelx64f
+        step_y_g = gradiente * sobely64f
+        mag_g = np.sqrt(step_x_g * step_x_g + step_y_g * step_y_g) +1
+
+        grad_x_g = step_x_g / mag_g
+        grad_y_g = step_y_g / mag_g
+
+
+        for x in xrange(edges.shape[1]):
+            for y in xrange(edges.shape[0]):
+                if edges[y, x] > 0:
+                    step_x = step_x_g[y, x]
+                    step_y = step_y_g[y, x]
+                    mag = mag_g[y, x]
+                    grad_x = grad_x_g[y, x]
+                    grad_y = grad_y_g[y, x]
+                    ray = [] #raggio
+                    ray.append((x, y))
+                    prev_x, prev_y, i = x, y, 0
+                    while True:
+
+                        i += 1
+                        cur_x = int(math.floor(x + grad_x * i))
+                        cur_y = int(math.floor(y + grad_y * i))
+                        '''
+                        print " "
+                        print "i:"
+                        print i
+                        print "x:"
+                        print x
+                        print "grad_x:"
+                        print grad_x
+                        print "cur_x:"
+                        print cur_x
+                        print " "
+                        print "y:"
+                        print y
+                        print "grad_y:"
+                        print grad_y
+                        print "cur_y: "
+                        print cur_y
+                        print "edges[cur_y, cur_x]"
+                       #print edges[cur_y, cur_x]
+                        print "-------------------------------------------- "
+                        '''
+                        if cur_x != prev_x or cur_y != prev_y:
+                            # we have moved to the next pixel!
+                            '''
+                            print " "
+                            print "edges:"
+                            
+                            print " "
+                    
+                            print "-------------------------------------------- "
+                            '''
+                            try:
+                                if edges[cur_y, cur_x] > 0:
+                                    # found edge in the moved position
+                                    #QUI NON ENTRA
+                                    ray.append((cur_x, cur_y))
+                                    theta_point = theta[y, x]
+                                    alpha = theta[cur_y, cur_x]
+                                    #if math.acos(grad_x * -grad_x_g[cur_y, cur_x] + grad_y * -grad_y_g[cur_y, cur_x]) < np.pi/2.0:
+                                    if abs(abs(alpha-theta_point)-np.pi)<tolleranza:
+                                        #thickness = math.sqrt( (cur_x - x)*(cur_x-x) + (cur_y - y)*(cur_y-y) )
+                                        for (rp_x, rp_y) in ray:
+                                            swt[rp_y, rp_x] = 255
+                                        rays.append(ray)
+
+                                    break
+                                # this is positioned at end to ensure we don't add a point beyond image boundary
+                                ray.append((cur_x, cur_y))
+                            except IndexError:
+                                # reached image boundary
+
+                                theta_point = theta[y, x]
+                                alpha = theta[prev_y, prev_x]
+                                #if math.acos(grad_x * -grad_x_g[cur_y, cur_x] + grad_y * -grad_y_g[cur_y, cur_x]) < np.pi/2.0:
+                                if abs(abs(alpha-theta_point)-np.pi)<np.pi*2:
+                                    #thickness = math.sqrt( (cur_x - x)*(cur_x-x) + (cur_y - y)*(cur_y-y) )
+                                    for (rp_x, rp_y) in ray:
+                                        swt[rp_y, rp_x] = 255
+                                    rays.append(ray)
+
+                                break
+                            prev_x = cur_x
+                            prev_y = cur_y
+        if diagnostics:
+            cv2.imwrite('swt.jpg', swt)
             print "tempo totale swt in secondi:"
             fine_swt = time.clock() - t0
             print fine_swt-inizio_swt
 
         return swt
+
+
 
     @classmethod
     def _connect_components(cls, swt):
@@ -234,7 +362,7 @@ class SWTScrubber(object):
         # allow for dark-on-light and light-on-dark texts
         trees = {}
         # Assumption: we'll never have more than 65535-1 unique components
-        label_map = np.zeros(shape=swt.shape, dtype=np.uint16)
+        label_map = np.zeros(shape=swt.shape, dtype=np.uint16) #matrice che contiene i pixel al valore del label
         next_label = 1
         # First Pass, raster scan-style
         swt_ratio_threshold = 3.0
@@ -247,17 +375,17 @@ class SWTScrubber(object):
                                  (y-1, x),   # north
                                  (y-1, x+1)] # northeast
                     connected_neighbors = None
-                    neighborvals = []
+                    neighborvals = [] # contenuto il valore dei pixel vicini in label_map
 
                     for neighbor in neighbors:
                         # west
                         try:
-                            sw_n = swt[neighbor]
-                            label_n = label_map[neighbor]
+                            sw_n = swt[neighbor] #valore del pixel vicino in swt
+                            label_n = label_map[neighbor] #valore del pixel vicino in label_map
                         except IndexError:
                             continue
                         if label_n > 0 and sw_n / sw_point < swt_ratio_threshold and sw_point / sw_n < swt_ratio_threshold:
-                            neighborvals.append(label_n)
+                            neighborvals.append(label_n) #si aggiunge il valore del vicino in label_map
                             if connected_neighbors:
                                 connected_neighbors = Union(connected_neighbors, MakeSet(label_n))
                             else:
@@ -414,7 +542,7 @@ class SWTScrubber(object):
 
 
 
-final_mask = SWTScrubber.scrub('img5.jpg')
+final_mask = SWTScrubber.scrub('img2.jpg')
 
 '''
 file_url = 'http://upload.wikimedia.org/wikipedia/commons/0/0b/ReceiptSwiss.jpg'
@@ -445,4 +573,5 @@ try:
 finally:
 s3_response.close()
 '''
-cv2.imwrite('final.jpg', final_mask*3)
+cv2.imwrite('final.jpg', final_mask)
+
