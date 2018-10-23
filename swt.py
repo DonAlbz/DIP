@@ -31,7 +31,7 @@ class SWTScrubber(object):
         print theta[140:150,0:5]
         '''
         #print canny[143,0]
-        gradiente=-1 #il gradiente deve essere uguale a 1 (trova lettere scure) o a -1
+        gradiente=1 #il gradiente deve essere uguale a 1 (trova lettere scure) o a -1
         swt = cls._swt(theta, canny, sobelx, sobely, gradiente)
 
 
@@ -86,7 +86,7 @@ class SWTScrubber(object):
         swt[:] = np.Infinity
         rays = []
         rays2=[]
-        tolleranza=np.pi/2
+        tolleranza=np.pi/3
         diagonal=(int)(np.sqrt(len(theta)*len(theta) + len(theta[0])*len(theta[0])))
         histRay=np.zeros((diagonal),dtype=np.uint8)
         inizio_swt= time.clock() - t0
@@ -173,21 +173,56 @@ class SWTScrubber(object):
                             prev_y = cur_y
 
         # Compute median SWT
-        '''for ray in rays:
-            median = np.median([swt[y, x] for (x, y) in ray)
+        for ray in rays:
+            median = np.median([swt[y, x] for (x, y) in ray])
             for (x, y) in ray:
                 swt[y, x] = min(median, swt[y, x])
-        if diagnostics:
+        '''if diagnostics:
             cv2.imwrite('swt.jpg', swt)
             print "tempo totale swt in secondi:"
             fine_swt = time.clock() - t0
             print fine_swt-inizio_swt
         '''
-        for i in range(0, len(rays2)):
+        for i in range(0, len(rays2)):# crea istogramma dei raggi
             histRay[rays2[i][1]] = histRay[rays2[i][1]] + 1
-        print histRay[20:30]
 
 
+        lettere=[] #array che contiene i raggi con spessore simile
+        #boolHist=np.zeros(len(histRay), dtype=bool)
+
+        percentualeIntervallo=0.025
+        i=0
+        while histRay.any():
+            centerHist=np.where(histRay==max(histRay))[0][0] #ritorna l'intice del massimo
+            intervallo=(int)(histRay[centerHist]*percentualeIntervallo) #intervallo di tolleranza dal centro agli estremi
+
+            supHist = centerHist + intervallo
+            if supHist> len(histRay):
+                supHist=len(histRay)
+            infHist = centerHist - intervallo
+            if infHist<0:
+                infHist=0
+            while histRay[supHist+1]<histRay[supHist]:
+                supHist=supHist+1
+            while histRay[infHist-1]<histRay[infHist]:
+                infHist=infHist-1
+            while histRay[supHist]==0:
+                supHist=supHist-1
+            while histRay[infHist]==0:
+                infHist=infHist+1
+            #boolHist[infHist:supHist+1]=True
+            lettere.append(np.copy(histRay[infHist:supHist+1]))
+            histRay[infHist:supHist+1]=0
+            print lettere[i]
+            i=i+1
+
+        '''
+        print max(histRay)
+        for i in range(0,len(histRay)):
+            if histRay[i]==max(histRay):
+                print i
+        print np.where(histRay==250)[0][0]
+        '''
         return swt
 
     #swt sporca che trova quello che non è una lettera
