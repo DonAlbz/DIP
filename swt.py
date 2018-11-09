@@ -155,7 +155,7 @@ class SWTScrubber(object):
             for spessore in lettere[i][1]: #si prende solamente gli spessori e si tralasciano le frequenze
                 for indiceDiRays2 in np.where(np.array(rays2)[:,1]==spessore)[0]: #per ogni valore dello spessore si risale agli indici dei raggi dell'array rays2 che hanno lo stesso spessore
                    print rays2[indiceDiRays2][0][(int)(len(rays2[indiceDiRays2][0])/2)] # si prendono i punti medi di ogni raggio
-
+        '''TODO: creare un istogramma dei label ottenuti dal connected components'''
 
 
         '''
