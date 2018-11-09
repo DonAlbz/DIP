@@ -1021,4 +1021,32 @@ def incornicia(image):
         im_incor[1: 1+M, 1: 1+N ] = image[:,:]
     return im_incor
 
-# In[ ]:
+# Connect component a 2 fasi
+def connectedComponent(image):
+    M = len(image)
+    N = len(image[0])
+    intorno=[[-1,0],[-1,1],[0,1],[1,1]]
+    livelli=np.zeros((M,N), dtype=np.uint8)
+    nextLivello=1
+    linked =[]
+    pixelDaRicercare=[]
+    for i in range(M):
+        for j in range(N):
+            if image[i,j] and not livelli[i,j]:
+                livelli[i,j]=nextLivello
+                pixelDaRicercare.append([i,j])
+            while not (len(pixelDaRicercare)==0):
+                p_i,p_j=pixelDaRicercare.pop()
+                for k in intorno:
+                    i_k, j_k = k
+                    if image[p_i+i_k, p_j + j_k] and livelli[p_i+i_k, p_j + j_k]:
+                        livelli[p_i+i_k, p_j + j_k]=nextLivello
+                        pixelDaRicercare.append([p_i+i_k, p_j + j_k])
+            nextLivello=nextLivello+1
+    return livelli
+
+
+
+
+
+

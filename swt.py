@@ -18,6 +18,9 @@ t0 = time.clock()
 diagnostics = True
 
 
+
+
+
 class SWTScrubber(object):
     @classmethod
     def scrub(cls, filepath):
@@ -30,9 +33,27 @@ class SWTScrubber(object):
         ''' print "theta matrix:"
         print theta[140:150,0:5]
         '''
+
         #print canny[143,0]
-        gradiente=1 #il gradiente deve essere uguale a 1 (trova lettere scure) o a -1
-        swt = cls._swt(theta, canny, sobelx, sobely, gradiente)
+        gradiente=-1 #il gradiente deve essere uguale a 1 (trova lettere chiare) o a -1
+        swt , rays2 = cls._swt(theta, canny, sobelx, sobely, -gradiente)
+        swt = cls._swt2(theta, canny, sobelx, sobely, gradiente)#salva il risultato dello sporco
+        swt[swt==np.Infinity]=0
+        canny=cv2.morphologyEx(canny, cv2.MORPH_DILATE, (3,3))
+        canny=cv2.morphologyEx(canny, cv2.MORPH_CLOSE, (3,3))
+        canny=cv2.morphologyEx(canny, cv2.MORPH_ERODE, (3,3))
+        edgesANDswt=swt+canny
+        ret,labels=cv2.connectedComponents(funzioni.negativo(edgesANDswt), connectivity=4)
+        cls.trovaLettere(theta, rays2, labels)
+        #viaualizzazione del connected components a colori
+        label_hue = np.uint8(179*labels/np.max(labels))
+        blank_ch=255*np.ones_like(label_hue)
+        labeled_img=cv2.merge([label_hue, blank_ch, blank_ch])
+        labeled_img=cv2.cvtColor(labeled_img, cv2.COLOR_HSV2BGR)
+        labeled_img[label_hue==0]=0
+        #print labels[10:15, 10:15]
+
+        cv2.imwrite('edgesConRegioni.jpg', labeled_img)
 
 
        # shapes = cls._connect_components(swt)
@@ -80,13 +101,82 @@ class SWTScrubber(object):
         return (edges, sobelx64f, sobely64f, theta)
 
     @classmethod
+    def trovaLettere(cls, theta, rays2, labels):
+        diagonal=(int)(np.sqrt(len(theta)*len(theta) + len(theta[0])*len(theta[0])))
+        histRay=np.zeros((diagonal),dtype=np.uint8)
+        for i in range(0, len(rays2)):# crea istogramma dei raggi
+            histRay[rays2[i][1]] = histRay[rays2[i][1]] + 1
+
+
+        lettere=[] #array che contiene i raggi con spessore simile
+        #boolHist=np.zeros(len(histRay), dtype=bool)
+
+        percentualeIntervallo=0.025
+        i=0
+        while histRay.any():
+            centerHist=np.where(histRay==max(histRay))[0][0] #ritorna l'indice del massimo
+            intervallo=(int)(histRay[centerHist]*percentualeIntervallo) #intervallo di tolleranza dal centro agli estremi
+
+            supHist = centerHist + intervallo
+            if supHist> len(histRay):
+                supHist=len(histRay)
+            infHist = centerHist - intervallo
+            if infHist<0:
+                infHist=0
+            while histRay[supHist+1]<histRay[supHist]:
+                supHist=supHist+1
+            while histRay[infHist-1]<histRay[infHist]:
+                infHist=infHist-1
+            while histRay[supHist]==0:
+                supHist=supHist-1
+            while histRay[infHist]==0:
+                infHist=infHist+1
+            #boolHist[infHist:supHist+1]=True
+            lettere.append([np.copy(histRay[infHist:supHist+1]),range(infHist,supHist+1)])
+            '''
+            struttura lettere = [array1([freq1, freq2, freq3],[spessore1, spessore2,spessore3]), array2([...],[...]),...]
+            struttura lettere[0] = [array([freq1,freq2, freq3],[spessore1, spessore2, spessore3])]
+            struttura lettere[0][0] = [freq1, freq2, freq3]
+            '''
+            histRay[infHist:supHist+1]=0
+            #print lettere[i]
+            i=i+1
+        '''
+        print "lettere[0]", lettere[0]
+        print "lettere[0][0]",lettere[0][0]
+        print "lettere[0][1][0]",lettere[0][1][0]
+        print "rays2[:]", np.where(np.array(rays2)[:,1]==10) #lista degli indici dei raggi contenuti in ray2 con spessore 10
+        #ad ogni indice corrisponde un raggio (ovvero una lista di punti) e lo spessore
+        '''
+        print "rays2[17896]", np.where(np.array(rays2)[:,1]==10)[0]
+
+        totaleIntorniPresi=(int)( len(lettere)*0.1) #numero di intorni di lettere presi
+        for i in range (0, totaleIntorniPresi+1): #per ogni array di lettere (intorno) preso
+            for spessore in lettere[i][1]: #si prende solamente gli spessori e si tralasciano le frequenze
+                for indiceDiRays2 in np.where(np.array(rays2)[:,1]==spessore)[0]: #per ogni valore dello spessore si risale agli indici dei raggi dell'array rays2 che hanno lo stesso spessore
+                   print rays2[indiceDiRays2][0][(int)(len(rays2[indiceDiRays2][0])/2)] # si prendono i punti medi di ogni raggio
+
+
+
+        '''
+        print max(histRay)
+        for i in range(0,len(histRay)):
+            if histRay[i]==max(histRay):
+                print i
+        print np.where(histRay==250)[0][0]
+        '''
+
+
+
+
+    @classmethod
     def _swt(self, theta, edges, sobelx64f, sobely64f, gradiente):
         # create empty image, initialized to infinity
         swt = np.empty(theta.shape)
         swt[:] = np.Infinity
         rays = []
         rays2=[]
-        tolleranza=np.pi/3
+        tolleranza=np.pi/4
         diagonal=(int)(np.sqrt(len(theta)*len(theta) + len(theta[0])*len(theta[0])))
         histRay=np.zeros((diagonal),dtype=np.uint8)
         inizio_swt= time.clock() - t0
@@ -112,6 +202,7 @@ class SWTScrubber(object):
                     grad_y = grad_y_g[y, x]
                     ray = [] #raggio
                     ray.append((x, y))
+
                     prev_x, prev_y, i = x, y, 0
                     while True:
 
@@ -150,7 +241,7 @@ class SWTScrubber(object):
                             print "-------------------------------------------- "
                             '''
                             try:
-                                if edges[cur_y, cur_x] > 0:
+                                if  edges[cur_y, cur_x] > 0 and cur_y>0 and cur_x>0:
                                     # found edge in the moved position
                                     #QUI NON ENTRA
                                     ray.append((cur_x, cur_y))
@@ -162,7 +253,7 @@ class SWTScrubber(object):
                                         for (rp_x, rp_y) in ray:
                                             swt[rp_y, rp_x] = min(thickness, swt[rp_y, rp_x])
                                         rays.append(ray)
-                                        rays2.append((ray,(int)(thickness)))
+                                        rays2.append([ray,(int)(thickness)])
                                     break
                                 # this is positioned at end to ensure we don't add a point beyond image boundary
                                 ray.append((cur_x, cur_y))
@@ -177,7 +268,7 @@ class SWTScrubber(object):
             median = np.median([swt[y, x] for (x, y) in ray])
             for (x, y) in ray:
                 swt[y, x] = min(median, swt[y, x])
-        '''if diagnostics:
+        if diagnostics:
             cv2.imwrite('swt.jpg', swt)
             print "tempo totale swt in secondi:"
             fine_swt = time.clock() - t0
@@ -193,7 +284,7 @@ class SWTScrubber(object):
         percentualeIntervallo=0.025
         i=0
         while histRay.any():
-            centerHist=np.where(histRay==max(histRay))[0][0] #ritorna l'intice del massimo
+            centerHist=np.where(histRay==max(histRay))[0][0] #ritorna l'indice del massimo
             intervallo=(int)(histRay[centerHist]*percentualeIntervallo) #intervallo di tolleranza dal centro agli estremi
 
             supHist = centerHist + intervallo
@@ -211,11 +302,38 @@ class SWTScrubber(object):
             while histRay[infHist]==0:
                 infHist=infHist+1
             #boolHist[infHist:supHist+1]=True
-            lettere.append(np.copy(histRay[infHist:supHist+1]))
+            lettere.append([np.copy(histRay[infHist:supHist+1]),range(infHist,supHist+1)])
+        '''
+        '''
+            struttura lettere = [array1([freq1, freq2, freq3],[spessore1, spessore2,spessore3]), array2([...],[...]),...]
+            struttura lettere[0] = [array([freq1,freq2, freq3],[spessore1, spessore2, spessore3])]
+            struttura lettere[0][0] = [freq1, freq2, freq3]
+        '''
+        '''
             histRay[infHist:supHist+1]=0
-            print lettere[i]
+            #print lettere[i]
             i=i+1
+        '''
+        '''
+        print "lettere[0]", lettere[0]
+        print "lettere[0][0]",lettere[0][0]
+        print "lettere[0][1][0]",lettere[0][1][0]
+        print "rays2[:]", np.where(np.array(rays2)[:,1]==10) #lista degli indici dei raggi contenuti in ray2 con spessore 10
+        #ad ogni indice corrisponde un raggio (ovvero una lista di punti) e lo spessore
+        '''
+        '''
+        print "rays2[17896]", np.where(np.array(rays2)[:,1]==10)[0]
 
+        totaleIntorniPresi=(int)( len(lettere)*0.1) #numero di intorni di lettere presi
+        for i in range (0, totaleIntorniPresi+1): #per ogni array di lettere (intorno) preso
+            for spessore in lettere[i][1]: #si prende solamente gli spessori e si tralasciano le frequenze
+                #print "spessore", spessore
+                for indiceDiRays2 in np.where(np.array(rays2)[:,1]==spessore)[0]: #per ogni valore dello spessore si risale agli indici dei raggi dell'array rays2 che hanno lo stesso spessore
+                   #print rays2[indiceDiRays2][0]
+                   print rays2[indiceDiRays2][0][(int)(len(rays2[indiceDiRays2][0])/2)] # si prendono i punti medi di ogni raggio
+
+
+        '''
         '''
         print max(histRay)
         for i in range(0,len(histRay)):
@@ -223,7 +341,8 @@ class SWTScrubber(object):
                 print i
         print np.where(histRay==250)[0][0]
         '''
-        return swt
+
+        return swt, rays2
 
     #swt sporca che trova quello che non è una lettera
     @classmethod
@@ -331,6 +450,8 @@ class SWTScrubber(object):
             print "tempo totale swt in secondi:"
             fine_swt = time.clock() - t0
             print fine_swt-inizio_swt
+        #trasforma swt da una matrice float ad una matrice di interi
+        swt[swt==np.Infinity]=0
 
         return swt
 
@@ -577,7 +698,7 @@ class SWTScrubber(object):
 
 
 
-final_mask = SWTScrubber.scrub('img2.jpg')
+final_mask = SWTScrubber.scrub('img6.jpg')
 
 '''
 file_url = 'http://upload.wikimedia.org/wikipedia/commons/0/0b/ReceiptSwiss.jpg'
