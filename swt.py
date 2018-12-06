@@ -30,21 +30,25 @@ class SWTScrubber(object):
         :return: numpy array representing result of transform
         """
         canny, sobelx, sobely, theta = cls._create_derivative(filepath)
-        ''' print "theta matrix:"
+        '''
+        print "dimensioni edges y,x",len(canny[0]), len(canny)
+        print "theta matrix:"
         print theta[140:150,0:5]
         '''
 
         #print canny[143,0]
-        gradiente=-1 #il gradiente deve essere uguale a 1 (trova lettere chiare) o a -1
-        swt , rays2 = cls._swt(theta, canny, sobelx, sobely, -gradiente)
-        swt = cls._swt2(theta, canny, sobelx, sobely, gradiente)#salva il risultato dello sporco
+        gradiente=1 #il gradiente deve essere uguale a 1 (trova lettere chiare) o a -1
+        swt , rays2 = cls._swt(theta, canny, sobelx, sobely, gradiente)
+        swtSporco = cls._swt2(theta, canny, sobelx, sobely, -gradiente)#salva il risultato dello sporco (che non trova le lettere, ma trova il resto)
         swt[swt==np.Infinity]=0
         canny=cv2.morphologyEx(canny, cv2.MORPH_DILATE, (3,3))
         canny=cv2.morphologyEx(canny, cv2.MORPH_CLOSE, (3,3))
         canny=cv2.morphologyEx(canny, cv2.MORPH_ERODE, (3,3))
-        edgesANDswt=swt+canny
+        cv2.imwrite('edgesDopoDoppioClose.jpg', canny)
+        edgesANDswt=swtSporco+canny
         ret,labels=cv2.connectedComponents(funzioni.negativo(edgesANDswt), connectivity=4)
-        cls.trovaLettere(theta, rays2, labels)
+        print labels.shape
+        labelHist=cls.trovaLettere(theta, rays2, labels)
         #viaualizzazione del connected components a colori
         label_hue = np.uint8(179*labels/np.max(labels))
         blank_ch=255*np.ones_like(label_hue)
@@ -53,6 +57,7 @@ class SWTScrubber(object):
         labeled_img[label_hue==0]=0
         #print labels[10:15, 10:15]
 
+        labeled_img=cls.coloraAree(labelHist,labels)
         cv2.imwrite('edgesConRegioni.jpg', labeled_img)
 
 
@@ -101,6 +106,26 @@ class SWTScrubber(object):
         return (edges, sobelx64f, sobely64f, theta)
 
     @classmethod
+    def coloraAree(cls, labelHist, oldLabel):
+        size=oldLabel.shape
+        M=len(oldLabel)
+        N=len(oldLabel[0])
+        if(len(size)==2):
+            col=1
+            labels=np.zeros((M,N,col))
+        for i in range(len(labelHist)):
+            if labelHist[i]>0:
+                labels[np.where(oldLabel==labelHist[i])]=i+2
+
+        #labels=labels.tolist()
+        label_hue = np.uint8(179*labels/np.max(labels))
+        blank_ch=255*np.ones_like(label_hue)
+        labeled_img=cv2.merge([label_hue, blank_ch, blank_ch])
+        labeled_img=cv2.cvtColor(labeled_img, cv2.COLOR_HSV2BGR)
+        labeled_img[np.where(label_hue==0)]=0
+        return labeled_img
+
+    @classmethod
     def trovaLettere(cls, theta, rays2, labels):
         diagonal=(int)(np.sqrt(len(theta)*len(theta) + len(theta[0])*len(theta[0])))
         histRay=np.zeros((diagonal),dtype=np.uint8)
@@ -146,17 +171,33 @@ class SWTScrubber(object):
         print "lettere[0][0]",lettere[0][0]
         print "lettere[0][1][0]",lettere[0][1][0]
         print "rays2[:]", np.where(np.array(rays2)[:,1]==10) #lista degli indici dei raggi contenuti in ray2 con spessore 10
-        #ad ogni indice corrisponde un raggio (ovvero una lista di punti) e lo spessore
-        '''
+        #ad ogni elemento di rays2 corrisponde un raggio (ovvero una lista di punti) e lo spessore
         print "rays2[17896]", np.where(np.array(rays2)[:,1]==10)[0]
+        '''
+        print "len labels, len labels[0]", len(labels), len(labels[0])
+        print
+        print "len theta, len theta[0]", len(theta), len(theta[0])
+        maxLabel=0#massimo numero di label
+        for riga in labels:
+            if max(riga)>maxLabel:
+                maxLabel=max(riga)
 
-        totaleIntorniPresi=(int)( len(lettere)*0.1) #numero di intorni di lettere presi
-        for i in range (0, totaleIntorniPresi+1): #per ogni array di lettere (intorno) preso
-            for spessore in lettere[i][1]: #si prende solamente gli spessori e si tralasciano le frequenze
-                for indiceDiRays2 in np.where(np.array(rays2)[:,1]==spessore)[0]: #per ogni valore dello spessore si risale agli indici dei raggi dell'array rays2 che hanno lo stesso spessore
-                   print rays2[indiceDiRays2][0][(int)(len(rays2[indiceDiRays2][0])/2)] # si prendono i punti medi di ogni raggio
+        labelHist=np.zeros((maxLabel), dtype=np.uint8)
+        print len(labelHist)
+        totaleIntorniPresi=(int)( len(lettere)*1) #numero di intorni di lettere presi
+        try:
+            for i in range (0, totaleIntorniPresi+1): #per ogni array di lettere (intorno) preso
+                for spessore in lettere[i][1]: #si prende solamente gli spessori e si tralasciano le frequenze
+                    for indiceDiRays2 in np.where(np.array(rays2)[:,1]==spessore)[0]: #per ogni valore dello spessore si risale agli indici dei raggi dell'array rays2 che hanno lo stesso spessore
+                       coordinatePuntoMedio=rays2[indiceDiRays2][0][(int)(len(rays2[indiceDiRays2][0])/2)] # si prendono i punti medi di ogni raggio
+                       numeroLabel=labels[coordinatePuntoMedio[1],coordinatePuntoMedio[0]] #prendo il numero della label dove si trova il punto medio
+                       labelHist[numeroLabel]= labelHist[numeroLabel] + 1 #viene incrementata di 1 la frequenza dei punti presenti sul label considerato
+        except IndexError:
+            print "eccezione",rays2[indiceDiRays2][0]
+        print labelHist
         '''TODO: creare un istogramma dei label ottenuti dal connected components'''
-
+        '''TODO: bug nei raggi trovati, sforano di 1 il bordo dell'immagine.
+        '''
 
         '''
         print max(histRay)
@@ -165,6 +206,7 @@ class SWTScrubber(object):
                 print i
         print np.where(histRay==250)[0][0]
         '''
+        return labelHist
 
 
 
@@ -172,6 +214,7 @@ class SWTScrubber(object):
     @classmethod
     def _swt(self, theta, edges, sobelx64f, sobely64f, gradiente):
         # create empty image, initialized to infinity
+        conta=0
         swt = np.empty(theta.shape)
         swt[:] = np.Infinity
         rays = []
@@ -204,7 +247,8 @@ class SWTScrubber(object):
                     ray.append((x, y))
 
                     prev_x, prev_y, i = x, y, 0
-                    while True:
+                    noBordi= True
+                    while noBordi:
 
                         i += 1
                         cur_x = int(math.floor(x + grad_x * i))
@@ -241,24 +285,29 @@ class SWTScrubber(object):
                             print "-------------------------------------------- "
                             '''
                             try:
-                                if  edges[cur_y, cur_x] > 0 and cur_y>0 and cur_x>0:
-                                    # found edge in the moved position
-                                    #QUI NON ENTRA
-                                    ray.append((cur_x, cur_y))
-                                    theta_point = theta[y, x]
-                                    alpha = theta[cur_y, cur_x]
-                                    #if math.acos(grad_x * -grad_x_g[cur_y, cur_x] + grad_y * -grad_y_g[cur_y, cur_x]) < np.pi/2.0:
-                                    if abs(abs(alpha-theta_point)-np.pi)<tolleranza:
-                                        thickness = math.sqrt( (cur_x - x)*(cur_x-x) + (cur_y - y)*(cur_y-y) )
-                                        for (rp_x, rp_y) in ray:
-                                            swt[rp_y, rp_x] = min(thickness, swt[rp_y, rp_x])
-                                        rays.append(ray)
-                                        rays2.append([ray,(int)(thickness)])
-                                    break
+                                conta=conta+1
+                                if cur_y>0 and cur_x>0:
+                                    if edges[cur_y, cur_x] > 0:
+                                    #if edges[cur_y, cur_x] > 0:
+                                        # found edge in the moved position
+                                        #QUI NON ENTRA
+                                        ray.append((cur_x, cur_y))
+                                        theta_point = theta[y, x]
+                                        alpha = theta[cur_y, cur_x]
+                                        #if math.acos(grad_x * -grad_x_g[cur_y, cur_x] + grad_y * -grad_y_g[cur_y, cur_x]) < np.pi/2.0:
+                                        if abs(abs(alpha-theta_point)-np.pi)<tolleranza:
+                                            thickness = math.sqrt( (cur_x - x)*(cur_x-x) + (cur_y - y)*(cur_y-y) )
+                                            for (rp_x, rp_y) in ray:
+                                                swt[rp_y, rp_x] = min(thickness, swt[rp_y, rp_x])
+                                            rays.append(ray)
+                                            rays2.append([ray,(int)(thickness)])
+                                        break
+                                else:
+                                    noBordi=False
                                 # this is positioned at end to ensure we don't add a point beyond image boundary
                                 ray.append((cur_x, cur_y))
                             except IndexError:
-                                # reached image boundary
+
                                 break
                             prev_x = cur_x
                             prev_y = cur_y
@@ -273,6 +322,7 @@ class SWTScrubber(object):
             print "tempo totale swt in secondi:"
             fine_swt = time.clock() - t0
             print fine_swt-inizio_swt
+            print "conta=", conta
         '''
         for i in range(0, len(rays2)):# crea istogramma dei raggi
             histRay[rays2[i][1]] = histRay[rays2[i][1]] + 1
@@ -446,7 +496,7 @@ class SWTScrubber(object):
                             prev_x = cur_x
                             prev_y = cur_y
         if diagnostics:
-            cv2.imwrite('swt.jpg', swt)
+            cv2.imwrite('swtSporco.jpg', swt)
             print "tempo totale swt in secondi:"
             fine_swt = time.clock() - t0
             print fine_swt-inizio_swt
